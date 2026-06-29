@@ -73,6 +73,19 @@ git clone https://github.com/myusufyilmaz/gatekept.git ~/.claude/skills/gatekept
 ```
 Then ask Claude: *"security scan my mac"* or *"optimize my mac"*.
 
+### Use it as a Codex skill
+```bash
+git clone https://github.com/myusufyilmaz/gatekept.git ~/.codex/skills/gatekept
+```
+Then ask Codex: *"Use $gatekept to security scan my Mac"* or simply
+*"security scan my mac"*.
+
+For local development, symlink your checkout instead of cloning twice:
+```bash
+mkdir -p ~/.codex/skills
+ln -s "$PWD" ~/.codex/skills/gatekept
+```
+
 ---
 
 ## Commands

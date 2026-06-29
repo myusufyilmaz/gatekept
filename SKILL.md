@@ -22,7 +22,10 @@ dylib passes ClamAV clean. `codesign --verify` + `spctl` catch it instantly. The
 
 ## How to run
 
-The CLI lives at `bin/gatekept`. All commands are read-only except
+The CLI lives at `bin/gatekept` in this skill directory. When invoked as a
+Claude Code or Codex skill, resolve the directory containing this `SKILL.md` and
+run the bundled CLI from there; do not assume the user's current working
+directory is the skill checkout. All commands are read-only except
 `optimize --apply`.
 
 ```bash

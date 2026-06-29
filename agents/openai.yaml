@@ -1,0 +1,4 @@
+interface:
+  display_name: "gatekept"
+  short_description: "Audit and optimize macOS host hygiene"
+  default_prompt: "Use $gatekept to run a read-only macOS security audit and triage any suspicious app signatures."
