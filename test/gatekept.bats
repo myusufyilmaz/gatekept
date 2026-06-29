@@ -61,3 +61,14 @@ GK="${BATS_TEST_DIRNAME}/../bin/gatekept"
   run "$GK" inspect
   [ "$status" -eq 2 ]
 }
+
+@test "network command runs" { run "$GK" network; [ "$status" -eq 0 ]; }
+@test "hosts command runs" { run "$GK" hosts; [ "$status" -eq 0 ]; }
+@test "extensions command runs" { run "$GK" extensions; [ "$status" -eq 0 ]; }
+@test "updates command runs" { run "$GK" updates; [ "$status" -eq 0 ]; }
+@test "quarantine command runs" { run "$GK" quarantine; [ "$status" -eq 0 ]; }
+@test "update-check runs (offline-safe)" { run "$GK" update-check; [ "$status" -eq 0 ]; }
+@test "NO_COLOR suppresses ANSI escapes" {
+  run bash -c "NO_COLOR=1 '$GK' updates | cat -v | grep -c '\\^\\['"
+  [ "$output" -eq 0 ]
+}

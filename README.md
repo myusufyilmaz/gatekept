@@ -115,6 +115,12 @@ ln -s "$PWD" ~/.codex/skills/gatekept
 | `gatekept optimize` | report reclaimable caches | ❌ read-only |
 | `gatekept optimize --apply` | clean caches + unused sims | ✅ caches only |
 | `gatekept scan` | ClamAV known-malware scan | ❌ read-only |
+| `gatekept network` | listening ports + established connections | ❌ read-only |
+| `gatekept hosts` | `/etc/hosts` + DNS hijack check | ❌ read-only |
+| `gatekept extensions` | third-party system extensions + kexts | ❌ read-only |
+| `gatekept updates` | macOS / XProtect / Homebrew patch status | ❌ read-only |
+| `gatekept quarantine` | quarantined downloads + where they came from | ❌ read-only |
+| `gatekept update-check` | check for a newer gatekept release | ❌ read-only |
 | `gatekept full` | audit + optimize (dry-run) | ❌ read-only |
 | `gatekept --help` / `--version` | help / version | ❌ |
 

@@ -18,11 +18,11 @@
 # Exit status: 0 = clean, 3 = suspicious findings, 2 = usage error.
 
 set -uo pipefail
-VERSION="1.5.0"
+VERSION="1.6.0"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-# ---- presentation (TTY-aware) ----------------------------------------------
-if [ -t 1 ]; then
+# ---- presentation (TTY-aware; honors NO_COLOR) -----------------------------
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[31m'; G=$'\033[32m'; C=$'\033[36m'; X=$'\033[0m'
 else
   B=""; DIM=""; R=""; G=""; C=""; X=""
@@ -60,6 +60,12 @@ Commands:
   optimize           Report reclaimable dev caches + memory pressure.
     --apply          Actually clean caches (npm/pnpm/pip/brew) + unused sims.
   scan               ClamAV known-malware scan (requires: brew install clamav).
+  network            List listening ports and established connections.
+  hosts              Check /etc/hosts and DNS servers for hijacking.
+  extensions         List third-party system extensions and kexts.
+  updates            Show macOS / XProtect / Homebrew patch status.
+  quarantine         List quarantined downloads and where they came from.
+  update-check       Check for a newer gatekept release.
   full               audit, then optimize (dry-run).
 
 Options:
@@ -67,6 +73,7 @@ Options:
   -v, --version      Show version.
 
 Exit: 0 clean · 3 suspicious findings · 2 usage error.
+Env:  NO_COLOR disables color · VT_API_KEY enables VirusTotal in `inspect`.
 
 Safety:
   • audit/report/scan are read-only. optimize is dry-run unless --apply.
@@ -409,7 +416,7 @@ cmd_optimize() {
   local c; sz() { du -sh "$1" 2>/dev/null | cut -f1; }
   bold "==== gatekept :: optimize  (mode: $([ "$apply" = true ] && echo APPLY || echo DRY-RUN)) ===="
   hr; bold "Reclaimable caches (regenerate on demand):"
-  for c in "$HOME/.npm" "$HOME/Library/pnpm" "$HOME/Library/Caches/pip" "$HOME/Library/Caches/Homebrew" "$HOME/.cache" "$HOME/Library/Developer/Xcode/DerivedData" "$HOME/Library/Developer/CoreSimulator/Caches"; do
+  for c in "$HOME/.npm" "$HOME/Library/pnpm" "$HOME/Library/Caches/pip" "$HOME/Library/Caches/Homebrew" "$HOME/Library/Caches/Yarn" "$HOME/.cache" "$HOME/Library/Caches/go-build" "$HOME/.gradle/caches" "$HOME/.cargo/registry" "$HOME/Library/Developer/Xcode/DerivedData" "$HOME/Library/Developer/CoreSimulator/Caches"; do
     [ -e "$c" ] && printf "  %-55s %s\n" "$c" "$(sz "$c")"
   done
   hr; bold "Memory pressure:"
@@ -422,6 +429,8 @@ cmd_optimize() {
   command -v pip3  >/dev/null 2>&1 && { info "pip cache purge";  pip3 cache purge >/dev/null 2>&1 && ok "pip"; }
   command -v pnpm  >/dev/null 2>&1 && { info "pnpm store prune"; pnpm store prune >/dev/null 2>&1 && ok "pnpm"; }
   command -v brew  >/dev/null 2>&1 && { info "brew cleanup -s";  brew cleanup -s >/dev/null 2>&1 && ok "brew"; }
+  command -v yarn  >/dev/null 2>&1 && { info "yarn cache clean"; yarn cache clean >/dev/null 2>&1 && ok "yarn"; }
+  command -v go    >/dev/null 2>&1 && { info "go clean -cache"; go clean -cache >/dev/null 2>&1 && ok "go"; }
   command -v xcrun >/dev/null 2>&1 && { info "delete unavailable simulators"; xcrun simctl delete unavailable >/dev/null 2>&1 && ok "simulators"; }
   hr; bold "optimize complete. ~/.cache left intact (may hold slow-to-rebuild downloads)."
 }
@@ -432,6 +441,82 @@ cmd_scan() {
   bold "==== gatekept :: ClamAV scan ===="
   clamscan -r -i --stdout --exclude-dir="$CLOUD_EXCLUDE" --max-filesize=200M --max-scansize=2000M \
     "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "/Applications" "$HOME/Library"
+}
+
+# ---- command: network — listening ports + established connections ----------
+cmd_network() {
+  bold "==== gatekept :: network ===="
+  hr; bold "Listening ports"
+  lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1{printf "  %-22s pid %-7s %s\n",$1,$2,$9}' | sort -u | head -40
+  hr; bold "Established outbound connections"
+  lsof -nP -iTCP -sTCP:ESTABLISHED 2>/dev/null | awk 'NR>1{printf "  %-22s pid %-7s %s\n",$1,$2,$9}' | sort -u | head -40
+  hr; info "${DIM}root-owned sockets need sudo to appear. Review unfamiliar listeners.${X}"
+}
+
+# ---- command: hosts — /etc/hosts + DNS hijack check ------------------------
+cmd_hosts() {
+  bold "==== gatekept :: hosts & DNS ===="
+  hr; bold "Non-default /etc/hosts entries"
+  local custom
+  custom=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$|broadcasthost|^[[:space:]]*(127\.0\.0\.1|255\.255\.255\.255|::1|0\.0\.0\.0)[[:space:]]+localhost[[:space:]]*$' /etc/hosts 2>/dev/null)
+  if [ -n "$custom" ]; then
+    printf '%s\n' "$custom" | while IFS= read -r l; do flag "$l"; done
+    info "${DIM}custom host mappings can redirect domains (phishing/hijack) — verify each${X}"
+  else ok "no custom host mappings"; fi
+  hr; bold "DNS servers"
+  scutil --dns 2>/dev/null | awk '/nameserver\[/{print "  "$3}' | sort -u | head
+}
+
+# ---- command: extensions — third-party system extensions & kexts ----------
+cmd_extensions() {
+  bold "==== gatekept :: system extensions & kexts ===="
+  hr; bold "System extensions (non-Apple)"
+  local sx
+  sx=$(systemextensionsctl list 2>/dev/null | grep -iE '\[activated|enabled\]' | grep -vi 'com.apple')
+  if [ -n "$sx" ]; then printf '%s\n' "$sx" | sed 's/^/  /'; else ok "none active"; fi
+  hr; bold "Third-party kernel extensions"
+  local kx
+  kx=$(kmutil showloaded 2>/dev/null | grep -v 'com.apple' | grep -vE 'No variant|UUID|^[[:space:]]*$' | tail -n +1)
+  if [ -n "$kx" ]; then printf '%s\n' "$kx" | sed 's/^/  /' | head -20; else ok "none (or kmutil needs sudo for full list)"; fi
+}
+
+# ---- command: updates — patch status ---------------------------------------
+cmd_updates() {
+  bold "==== gatekept :: updates ===="
+  hr
+  info "macOS:    $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+  info "XProtect: $(p_xprotect)"
+  if command -v brew >/dev/null 2>&1; then
+    info "Homebrew: $(brew outdated --quiet 2>/dev/null | grep -c .) outdated package(s)"
+  fi
+  hr; info "${DIM}check macOS security updates:  softwareupdate -l${X}"
+}
+
+# ---- command: quarantine — recently downloaded files + provenance ----------
+cmd_quarantine() {
+  bold "==== gatekept :: quarantined downloads ===="
+  hr
+  local f src n=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    xattr "$f" 2>/dev/null | grep -q 'com.apple.quarantine' || continue
+    src=$(mdls -name kMDItemWhereFroms "$f" 2>/dev/null | grep -vi '(null)' | tr '\n' ' ' | sed 's/kMDItemWhereFroms = //;s/[[:space:]]\{2,\}/ /g')
+    printf "  %s\n" "$(basename "$f")"; [ -n "$src" ] && info "${DIM}from:$src${X}"
+    n=$((n+1)); [ "$n" -ge 40 ] && break
+  done < <(find "$HOME/Downloads" -maxdepth 1 -type f 2>/dev/null)
+  [ "$n" -eq 0 ] && ok "no quarantined files in ~/Downloads"
+  return 0
+}
+
+# ---- command: update-check — compare to latest GitHub release --------------
+cmd_update_check() {
+  bold "gatekept $VERSION"
+  local latest
+  latest=$(curl -fsSL "https://api.github.com/repos/myusufyilmaz/gatekept/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name":[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)
+  if [ -z "$latest" ]; then info "could not reach GitHub (offline?)"; return 0; fi
+  if [ "$latest" = "$VERSION" ]; then ok "up to date (latest: $latest)"
+  else info "latest release: $latest (you have $VERSION) — brew upgrade gatekept"; fi
 }
 
 # ---- command: inspect — deep static risk analysis of one app ---------------
@@ -519,6 +604,12 @@ main() {
     inspect)        require_macos; shift || true; cmd_inspect "${1:-}" ;;
     optimize|opt)   require_macos; shift; cmd_optimize "${1:-}" ;;
     scan)           require_macos; cmd_scan ;;
+    network|net)    require_macos; cmd_network ;;
+    hosts|dns)      require_macos; cmd_hosts ;;
+    extensions|ext) require_macos; cmd_extensions ;;
+    updates)        require_macos; cmd_updates ;;
+    quarantine)     require_macos; cmd_quarantine ;;
+    update-check)   cmd_update_check ;;
     full)           require_macos; cmd_audit; echo; cmd_optimize ;;
     -h|--help|help) usage ;;
     -v|--version)   echo "gatekept $VERSION" ;;
