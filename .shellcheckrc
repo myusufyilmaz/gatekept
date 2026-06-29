@@ -1,0 +1,5 @@
+# gatekept shellcheck config
+shell=bash
+severity=warning
+# allow intentional word-splitting in `seq` loop for the hr() rule
+disable=SC2046

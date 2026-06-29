@@ -27,6 +27,7 @@ The CLI lives at `bin/gatekept`. All commands are read-only except
 
 ```bash
 bin/gatekept audit            # read-only security audit (default)
+bin/gatekept audit --json     # same, machine-readable JSON
 bin/gatekept report           # generate + open an HTML dashboard
 bin/gatekept optimize         # dry-run: report reclaimable caches
 bin/gatekept optimize --apply # clean npm/pnpm/pip/brew caches + unused sims
@@ -34,6 +35,12 @@ bin/gatekept scan             # ClamAV known-malware scan (if installed)
 bin/gatekept full             # audit + optimize (dry-run)
 bin/gatekept --help
 ```
+
+`audit` covers: hardening posture; a parallel app signature sweep (ad-hoc /
+dev-cert / injector-dylib / unknown-signer detection + notarization + hardened
+runtime); **deep persistence** (code-signs each LaunchAgent/Daemon target binary,
+flags unsigned/ad-hoc/user-writable); and a **shell-config hijack** scan. It
+exits **0** clean, **3** when anything is flagged (use this in scripts/CI).
 
 `report` writes a self-contained HTML dashboard (default
 `$TMPDIR/gatekept-report.html`) and opens it — posture, scanned/verified/flagged

@@ -6,7 +6,7 @@
 
 ![platform](https://img.shields.io/badge/platform-macOS-black)
 ![license](https://img.shields.io/badge/license-MIT-blue)
-![shell](https://img.shields.io/badge/bash-shellcheck%20clean-green)
+[![CI](https://github.com/myusufyilmaz/gatekept/actions/workflows/ci.yml/badge.svg)](https://github.com/myusufyilmaz/gatekept/actions/workflows/ci.yml)
 ![deps](https://img.shields.io/badge/dependencies-none-brightgreen)
 
 > **Why this exists.** During a real cleanup, a planted fake *Adobe Illustrator* — ad-hoc signed, carrying an injected `CoreInject.dylib` loader — was scanned by **ClamAV with 3.6 million signatures** and reported **clean**. Apple's own `codesign --verify` + `spctl` flagged it in **seconds**.
@@ -19,10 +19,11 @@
 
 ### `gatekept audit` — read-only security audit
 - **Hardening posture** — SIP, Gatekeeper, Firewall, FileVault, XProtect version
-- **App signature sweep** ⭐ — flags ad-hoc signed apps, dev/sideloaded certs, injector dylibs, and unknown-signer + Gatekeeper-rejected apps — the real fake/cracked-app fingerprint
-- **Injector-dylib deep sweep** across `/Applications`
-- **Persistence audit** — LaunchAgents & LaunchDaemons
-- **Recent installs** + live **CPU / memory / swap** snapshot
+- **App signature sweep** ⭐ — flags ad-hoc signed apps, dev/sideloaded certs, injector dylibs, and unknown-signer + Gatekeeper-rejected apps — the real fake/cracked-app fingerprint. Runs **in parallel** across all CPU cores.
+- **Deep persistence audit** — for every LaunchAgent & LaunchDaemon, resolves the target binary and **code-signs it**, flagging unsigned / ad-hoc / user-writable-path executables (skips stale plists and SIP-protected Apple entries)
+- **Shell-config hijack scan** — `.zshrc` / `.zshenv` / `.bash_profile` etc. for pipe-to-shell, base64-decode, and reverse-shell patterns
+- **Notarization + hardened-runtime** counts, live **CPU / swap** snapshot
+- **`--json`** machine-readable output; **exit code 3** when anything is flagged (CI/automation-friendly)
 
 ### `gatekept optimize` — reclaim space (dry-run by default)
 - Reports & (with `--apply`) clears regenerable dev caches: npm, pnpm, pip, Homebrew, Xcode DerivedData, simulator caches
@@ -39,14 +40,18 @@ Known-malware signatures — complements, does not replace, the signature sweep.
 
 ---
 
-## Quick start
+## Install
 
+**Homebrew (recommended):**
 ```bash
-# clone
+brew install myusufyilmaz/tap/gatekept
+gatekept audit
+```
+
+**Or clone and run — zero dependencies:**
+```bash
 git clone https://github.com/myusufyilmaz/gatekept.git
 cd gatekept
-
-# run (safe, read-only)
 bin/gatekept audit
 
 # see what could be cleaned (no changes)
@@ -75,6 +80,7 @@ Then ask Claude: *"security scan my mac"* or *"optimize my mac"*.
 | Command | Effect | Writes? |
 |---|---|---|
 | `gatekept audit` | full security audit | ❌ read-only |
+| `gatekept audit --json` | same, machine-readable JSON | ❌ read-only |
 | `gatekept report` | HTML dashboard, opens in browser | ❌ read-only |
 | `gatekept optimize` | report reclaimable caches | ❌ read-only |
 | `gatekept optimize --apply` | clean caches + unused sims | ✅ caches only |
@@ -122,7 +128,7 @@ See [SECURITY.md](SECURITY.md) for reporting.
 
 ## Limitations
 
-- `audit`'s signature sweep takes ~1–3 min (one `spctl` assessment per app).
+- `audit` runs one `spctl` assessment per app, parallelized across cores (~30–60 s on a typical install).
 - ClamAV is **not** bundled — install separately (`brew install clamav && freshclam`). It catches known-malware hashes, not impersonation.
 - Heuristics target the common fake/cracked-app patterns; a sufficiently sophisticated, properly-signed-then-revoked binary can still slip past. This is a strong first line, not a guarantee.
 
