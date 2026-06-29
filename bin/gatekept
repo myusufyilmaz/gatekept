@@ -18,7 +18,7 @@
 # Exit status: 0 = clean, 3 = suspicious findings, 2 = usage error.
 
 set -uo pipefail
-VERSION="1.2.0"
+VERSION="1.3.0"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 # ---- presentation (TTY-aware) ----------------------------------------------
@@ -155,6 +155,59 @@ shellrc_suspects() {
   done
 }
 
+# ---- login items + cron + login hooks (BTM-era persistence) ----------------
+# prints TSV: TYPE \t ITEM \t REASON   (suspicious only)
+startup_suspects() {
+  local raw name path csinfo reason h v
+  raw=$(osascript \
+    -e 'tell application "System Events"' \
+    -e 'set o to {}' \
+    -e 'repeat with li in login items' \
+    -e 'set p to ""' \
+    -e 'try' \
+    -e 'set p to (path of li)' \
+    -e 'end try' \
+    -e 'set end of o to (name of li) & tab & p' \
+    -e 'end repeat' \
+    -e "set AppleScript's text item delimiters to linefeed" \
+    -e 'return o as text' \
+    -e 'end tell' 2>/dev/null)
+  while IFS=$'\t' read -r name path; do
+    [ -n "$name" ] || continue
+    { [ -n "$path" ] && [ "$path" != "missing value" ] && [ -e "$path" ]; } || continue
+    csinfo=$(codesign -dvvv "$path" 2>&1)
+    reason=""
+    printf '%s\n' "$csinfo" | grep -q 'code object is not signed' && reason="unsigned"
+    printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && reason="ad-hoc signed"
+    case "$path" in
+      "$HOME"/Downloads/*|/tmp/*|/private/tmp/*|/private/var/folders/*)
+        reason="${reason:+$reason; }runs from user-writable path ($path)" ;;
+    esac
+    [ -n "$reason" ] && printf 'login-item\t%s\t%s\n' "$name" "$reason"
+  done <<< "$raw"
+  for h in LoginHook LogoutHook; do
+    v=$(defaults read com.apple.loginwindow "$h" 2>/dev/null) && [ -n "$v" ] \
+      && printf 'login-hook\t%s\t%s\n' "$h" "$v"
+  done
+  if crontab -l 2>/dev/null | grep -qvE '^[[:space:]]*(#|$)'; then
+    printf 'cron\tuser crontab\thas scheduled entries (legacy adware vector) — review: crontab -l\n'
+  fi
+}
+
+# ---- malware staging: unsigned/ad-hoc executables in temp dirs --------------
+# AMOS / ClickFix drop payloads here. prints TSV: PATH \t REASON
+staging_suspects() {
+  local f csinfo reason
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    csinfo=$(codesign -dvvv "$f" 2>&1)
+    reason=""
+    printf '%s\n' "$csinfo" | grep -q 'code object is not signed' && reason="unsigned executable in temp dir"
+    printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && reason="ad-hoc executable in temp dir"
+    [ -n "$reason" ] && printf '%s\t%s\n' "$f" "$reason"
+  done < <(find /tmp /private/tmp -maxdepth 3 -type f -perm +111 2>/dev/null | grep -v '/claude-501/' | head -50)
+}
+
 # ---- command: audit --------------------------------------------------------
 cmd_audit() {
   local json=false; [ "${1:-}" = "--json" ] && json=true
@@ -165,18 +218,20 @@ cmd_audit() {
     total=$((total+1)); [ "$no" = yes ] && notarc=$((notarc+1)); [ "$rt" = yes ] && rtc=$((rtc+1))
     [ "$st" = FLAG ] && flagc=$((flagc+1)) || okc=$((okc+1))
   done <<< "$recs"
-  local persist shellh pcount scount
+  local persist shellh startup staging pcount scount upcount stcount
   persist=$(persistence_suspects); shellh=$(shellrc_suspects)
+  startup=$(startup_suspects); staging=$(staging_suspects)
   pcount=$(printf '%s' "$persist" | grep -c . ); scount=$(printf '%s' "$shellh" | grep -c . )
-  local findings=$((flagc + pcount + scount))
+  upcount=$(printf '%s' "$startup" | grep -c . ); stcount=$(printf '%s' "$staging" | grep -c . )
+  local findings=$((flagc + pcount + scount + upcount + stcount))
 
   if [ "$json" = true ]; then
     printf '{\n  "version":"%s","host":"%s","os":"%s %s",\n' \
       "$VERSION" "$(json_escape "$(scutil --get ComputerName 2>/dev/null || hostname)")" "$(sw_vers -productName)" "$(sw_vers -productVersion)"
     printf '  "posture":{"sip":"%s","gatekeeper":"%s","firewall":"%s","filevault":"%s","xprotect":"%s"},\n' \
       "$(p_sip)" "$(p_gatekeeper)" "$(p_firewall)" "$(p_filevault)" "$(p_xprotect)"
-    printf '  "summary":{"scanned":%s,"verified":%s,"flagged":%s,"notarized":%s,"hardened_runtime":%s,"persistence_flags":%s,"shell_hijack_flags":%s},\n' \
-      "$total" "$okc" "$flagc" "$notarc" "$rtc" "$pcount" "$scount"
+    printf '  "summary":{"scanned":%s,"verified":%s,"flagged":%s,"notarized":%s,"hardened_runtime":%s,"persistence_flags":%s,"shell_hijack_flags":%s,"login_item_flags":%s,"staging_flags":%s},\n' \
+      "$total" "$okc" "$flagc" "$notarc" "$rtc" "$pcount" "$scount" "$upcount" "$stcount"
     printf '  "flagged":['
     local first=1
     while IFS=$'\t' read -r st nm sg no rt rsn; do
@@ -207,12 +262,22 @@ cmd_audit() {
     while IFS=$'\t' read -r pl tg rs; do [ -n "$pl" ] && { flag "$pl — $rs"; info "${DIM}$tg${X}"; }; done <<< "$persist"
   else ok "no suspicious persistence targets"; fi
   hr
-  bold "4. Shell-config hijack (.zshrc / .zshenv / .bash_profile …)"
+  bold "4. Login items / cron / startup hooks (BTM-era persistence)"
+  if [ "$upcount" -gt 0 ]; then
+    while IFS=$'\t' read -r ty it rs; do [ -n "$ty" ] && flag "[$ty] $it — $rs"; done <<< "$startup"
+  else ok "no suspicious login items, cron, or hooks"; fi
+  hr
+  bold "5. Shell-config hijack (.zshrc / .zshenv / .bash_profile …)"
   if [ "$scount" -gt 0 ]; then
     while IFS=$'\t' read -r fl mt; do [ -n "$fl" ] && flag "$fl: $mt"; done <<< "$shellh"
   else ok "no suspicious shell-config lines"; fi
   hr
-  bold "5. Resource snapshot"
+  bold "6. Malware staging — unsigned executables in /tmp (AMOS / ClickFix drop zone)"
+  if [ "$stcount" -gt 0 ]; then
+    while IFS=$'\t' read -r pa rs; do [ -n "$pa" ] && { flag "$rs"; info "${DIM}$pa${X}"; }; done <<< "$staging"
+  else ok "no unsigned executables staged in temp dirs"; fi
+  hr
+  bold "7. Resource snapshot"
   info "Top CPU:"; ps aux | sort -nrk 3 | head -5 | awk '{printf "      %5s%%  %s\n",$3,$11}'
   info "Swap used: $(sysctl -n vm.swapusage 2>/dev/null | sed 's/.*used = //;s/  free.*//')   ${DIM}(high swap on low RAM = pressure)${X}"
   hr

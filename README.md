@@ -4,10 +4,14 @@
 
 **macOS security audit & optimization — catches the threats signature antivirus misses.**
 
+**Runs as a plain CLI, a [Claude Code](https://www.anthropic.com/claude-code) skill, *and* an [OpenAI Codex](https://openai.com/codex) skill.**
+
 ![platform](https://img.shields.io/badge/platform-macOS-black)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 [![CI](https://github.com/myusufyilmaz/gatekept/actions/workflows/ci.yml/badge.svg)](https://github.com/myusufyilmaz/gatekept/actions/workflows/ci.yml)
 ![deps](https://img.shields.io/badge/dependencies-none-brightgreen)
+![Claude Code skill](https://img.shields.io/badge/Claude_Code-skill-da7756)
+![Codex skill](https://img.shields.io/badge/OpenAI_Codex-skill-412991)
 
 > **Why this exists.** During a real cleanup, a planted fake *Adobe Illustrator* — ad-hoc signed, carrying an injected `CoreInject.dylib` loader — was scanned by **ClamAV with 3.6 million signatures** and reported **clean**. Apple's own `codesign --verify` + `spctl` flagged it in **seconds**.
 >
@@ -22,8 +26,12 @@
 - **App signature sweep** ⭐ — flags ad-hoc signed apps, dev/sideloaded certs, injector dylibs, and unknown-signer + Gatekeeper-rejected apps — the real fake/cracked-app fingerprint. Runs **in parallel** across all CPU cores.
 - **Deep persistence audit** — for every LaunchAgent & LaunchDaemon, resolves the target binary and **code-signs it**, flagging unsigned / ad-hoc / user-writable-path executables (skips stale plists and SIP-protected Apple entries)
 - **Shell-config hijack scan** — `.zshrc` / `.zshenv` / `.bash_profile` etc. for pipe-to-shell, base64-decode, and reverse-shell patterns
+- **Login Items / BTM persistence** — code-signs every Login Item (flags ones launched from `~/Downloads` or temp, and unsigned/ad-hoc), plus **cron jobs** and legacy **login/logout hooks** (the Background-Task-Management-era + AdLoad vectors)
+- **Malware-staging sweep** — unsigned / ad-hoc executables dropped in `/tmp` — the **AMOS / ClickFix** drop zone
 - **Notarization + hardened-runtime** counts, live **CPU / swap** snapshot
 - **`--json`** machine-readable output; **exit code 3** when anything is flagged (CI/automation-friendly)
+
+> **Tuned to today's threats.** AMOS / Atomic Stealer (~40% of macOS malware in 2025) spreads via **ClickFix** lures that drop ad-hoc-signed payloads in `/tmp` and persist via **Background Task Management** login items — precisely the surfaces these checks cover.
 
 ### `gatekept optimize` — reclaim space (dry-run by default)
 - Reports & (with `--apply`) clears regenerable dev caches: npm, pnpm, pip, Homebrew, Xcode DerivedData, simulator caches
