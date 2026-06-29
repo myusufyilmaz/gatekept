@@ -44,9 +44,10 @@ dev-cert / injector-dylib / unknown-signer detection + notarization + hardened
 runtime); **deep persistence** (code-signs each LaunchAgent/Daemon target binary,
 flags unsigned/ad-hoc/user-writable); **Login Items / BTM** (code-signs each login
 item, flags Downloads/temp/unsigned) plus cron and login/logout hooks; a
-**shell-config hijack** scan; and a **`/tmp` staging** sweep for ad-hoc/unsigned
-payloads (AMOS / ClickFix drop zone). It exits **0** clean, **3** when anything is
-flagged (use this in scripts/CI).
+**shell-config hijack** scan; a **`/tmp` staging** sweep for ad-hoc/unsigned
+payloads (AMOS / ClickFix drop zone); and a **`~/Downloads` scan** for unsigned /
+cracked `.app` bundles. It exits **0** clean, **3** when anything is flagged (use
+this in scripts/CI).
 
 `report` writes a self-contained HTML dashboard (default
 `$TMPDIR/gatekept-report.html`) and opens it — posture, scanned/verified/flagged

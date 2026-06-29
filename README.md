@@ -28,6 +28,7 @@
 - **Shell-config hijack scan** — `.zshrc` / `.zshenv` / `.bash_profile` etc. for pipe-to-shell, base64-decode, and reverse-shell patterns
 - **Login Items / BTM persistence** — code-signs every Login Item (flags ones launched from `~/Downloads` or temp, and unsigned/ad-hoc), plus **cron jobs** and legacy **login/logout hooks** (the Background-Task-Management-era + AdLoad vectors)
 - **Malware-staging sweep** — unsigned / ad-hoc executables dropped in `/tmp` — the **AMOS / ClickFix** drop zone
+- **Downloads scan** — flags unsigned / ad-hoc / Gatekeeper-rejected `.app` bundles sitting in `~/Downloads` (cracked apps and stealers land here *before* they're moved to /Applications)
 - **Notarization + hardened-runtime** counts, live **CPU / swap** snapshot
 - **`--json`** machine-readable output; **exit code 3** when anything is flagged (CI/automation-friendly)
 
