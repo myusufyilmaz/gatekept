@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+
+# Generated reports contain real machine/app data — never commit these
+gatekept-report.html
+*-report.html
+.sample-report.html
+assets/_dash.html

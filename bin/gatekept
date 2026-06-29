@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# gatekept — macOS security audit & optimization
+# https://github.com/myusufyilmaz/gatekept   (MIT)
+#
+# Catches fake / cracked / tampered apps that signature antivirus misses,
+# audits hardening posture & persistence, reclaims dev caches, and can render
+# a self-contained HTML dashboard.
+#
+#   gatekept audit              read-only security audit (default)
+#   gatekept report             generate + open an HTML dashboard
+#   gatekept optimize [--apply] reclaim dev caches (dry-run unless --apply)
+#   gatekept scan               ClamAV known-malware scan (if installed)
+#   gatekept full               audit + optimize (dry-run)
+#   gatekept --help | --version
+#
+# Read-only by design. Nothing is deleted without --apply, and even then only
+# regenerable caches. Never touches user data or the cloud-storage mount.
+
+set -uo pipefail
+VERSION="1.1.0"
+
+# ---- presentation (TTY-aware) ----------------------------------------------
+if [ -t 1 ]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[31m'; G=$'\033[32m'; C=$'\033[36m'; X=$'\033[0m'
+else
+  B=""; DIM=""; R=""; G=""; C=""; X=""
+fi
+bold()  { printf "%s%s%s\n" "$B" "$1" "$X"; }
+hr()    { printf "%s" "$DIM"; printf -- '─%.0s' $(seq 1 70); printf "%s\n" "$X"; }
+flag()  { printf "  %s⚠ %s%s\n" "$R" "$1" "$X"; }
+ok()    { printf "  %s✓ %s%s\n" "$G" "$1" "$X"; }
+info()  { printf "  %s\n" "$1"; }
+
+banner() {
+  printf "%s" "$C"
+  cat <<'EOF'
+   ____       _       _              _
+  / ___| __ _| |_ ___| | _____ _ __ | |_
+ | |  _ / _` | __/ _ \ |/ / _ \ '_ \| __|
+ | |_| | (_| | ||  __/   <  __/ |_) | |_
+  \____|\__,_|\__\___|_|\_\___| .__/ \__|
+                              |_|
+EOF
+  printf "%s" "$X"
+  printf "  %smacOS security audit & optimization  v%s%s\n\n" "$DIM" "$VERSION" "$X"
+}
+
+usage() {
+  banner
+  cat <<EOF
+Usage: gatekept <command> [options]
+
+Commands:
+  audit              Read-only security audit (posture, fake-app sweep,
+                     persistence, resources). Default if no command given.
+  report             Render a self-contained HTML dashboard and open it.
+  optimize           Report reclaimable dev caches + memory pressure.
+    --apply          Actually clean caches (npm/pnpm/pip/brew) + unused sims.
+  scan               ClamAV known-malware scan (requires: brew install clamav).
+  full               audit, then optimize (dry-run).
+
+Options:
+  -h, --help         Show this help.
+  -v, --version      Show version.
+
+Safety:
+  • audit/report/scan are read-only. optimize is dry-run unless --apply.
+  • The iCloud / Google Drive CloudStorage mount is always excluded.
+  • Remove flagged apps to Trash (reversible), never with rm. Confirm first.
+EOF
+}
+
+CLOUD_EXCLUDE="^${HOME}/Library/CloudStorage"
+require_macos() { [ "$(uname -s)" = "Darwin" ] || { echo "gatekept: macOS only." >&2; exit 2; }; }
+
+# ---- posture helpers -------------------------------------------------------
+p_sip()       { csrutil status 2>/dev/null | sed 's/.*status: //;s/\.$//' ; }
+p_gatekeeper(){ spctl --status 2>/dev/null | sed 's/assessments //' ; }
+p_firewall()  { /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null | sed 's/.*Firewall is //;s/\. .*//' ; }
+p_filevault() { fdesetup status 2>/dev/null | sed 's/FileVault is //;s/\.$//' ; }
+p_xprotect()  { defaults read /Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist CFBundleShortVersionString 2>/dev/null || echo unknown ; }
+
+# ---- core: scan every app, emit TSV records --------------------------------
+# record: STATUS \t NAME \t SIGNER \t NOTARIZED \t RUNTIME \t REASON
+scan_apps() {
+  local app name csinfo spinfo auth inj reason notar rt gk_ok status
+  while IFS= read -r app; do
+    [ -z "$app" ] && continue
+    name=$(basename "$app" .app)
+    csinfo=$(codesign -dvvv "$app" 2>&1)
+    spinfo=$(spctl -a -t exec -vv "$app" 2>&1)
+    auth=$(printf '%s\n' "$csinfo" | sed -n 's/^Authority=//p' | head -1)
+    inj=$(find "$app/Contents/MacOS" -maxdepth 1 -iname '*inject*' 2>/dev/null | head -1)
+    gk_ok=true;   printf '%s\n' "$spinfo" | grep -qi 'accepted' || gk_ok=false
+    notar=no;     printf '%s\n' "$spinfo" | grep -qi 'Notarized' && notar=yes
+    rt=no;        printf '%s\n' "$csinfo" | grep -q 'flags=.*runtime' && rt=yes
+
+    reason=""
+    [ -n "$inj" ] && reason="injector dylib ($(basename "$inj")); ${reason}"
+    printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && reason="ad-hoc signed; ${reason}"
+    case "$auth" in
+      "Apple Development"*|"Apple Distribution"*) reason="dev/sideloaded cert; ${reason}" ;;
+      "Developer ID Application"*|"Apple iPhone OS Application Signing"|"Software Signing"|"Apple Mac OS Application Signing"|"Apple Mac OS X Application Signing") : ;;
+      *) [ "$gk_ok" = false ] && reason="unrecognized signer + Gatekeeper-rejected; ${reason}" ;;
+    esac
+
+    status="OK"; [ -n "$reason" ] && status="FLAG"
+    [ -z "$reason" ] && reason="-"
+    [ -z "$auth" ] && auth="(unsigned)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$status" "$name" "$auth" "$notar" "$rt" "${reason%; }"
+  done < <(find /Applications -maxdepth 2 -name "*.app" -prune 2>/dev/null)
+}
+
+# ---- command: audit (text) -------------------------------------------------
+cmd_audit() {
+  bold "==== gatekept :: security audit ===="
+  echo "host: $(scutil --get ComputerName 2>/dev/null || hostname)   $(sw_vers -productName) $(sw_vers -productVersion)   $(date '+%Y-%m-%d %H:%M')"
+  hr
+  bold "1. Hardening posture"
+  info "SIP:        $(p_sip)"
+  info "Gatekeeper: $(p_gatekeeper)"
+  info "Firewall:   $(p_firewall)"
+  info "FileVault:  $(p_filevault)"
+  info "XProtect:   $(p_xprotect)"
+  hr
+  bold "2. App signature sweep — flags fake / cracked / tampered apps"
+  local recs total=0 okc=0 flagc=0 notarc=0 rtc=0
+  recs=$(scan_apps)
+  while IFS=$'\t' read -r st nm sg no rt rsn; do
+    [ -z "$st" ] && continue
+    total=$((total+1))
+    [ "$no" = yes ] && notarc=$((notarc+1))
+    [ "$rt" = yes ] && rtc=$((rtc+1))
+    if [ "$st" = FLAG ]; then flagc=$((flagc+1)); flag "$nm — $rsn"; info "${DIM}signer: $sg${X}";
+    else okc=$((okc+1)); fi
+  done <<< "$recs"
+  [ "$flagc" -eq 0 ] && ok "no suspicious app signatures found"
+  hr
+  bold "   summary: $total scanned · $okc verified · $flagc flagged · $notarc notarized · $rtc hardened-runtime"
+  hr
+  bold "3. Persistence (LaunchAgents / LaunchDaemons)"
+  local d f
+  for d in "$HOME/Library/LaunchAgents" /Library/LaunchAgents /Library/LaunchDaemons; do
+    info "$d:"
+    [ -d "$d" ] && for f in "$d"/*.plist; do [ -e "$f" ] && printf "      %s\n" "$(basename "$f")"; done
+  done
+  info "${DIM}review any name that is random, non-vendor, or unfamiliar${X}"
+  hr
+  bold "4. Resource snapshot"
+  info "Top CPU:"; ps aux | sort -nrk 3 | head -5 | awk '{printf "      %5s%%  %s\n",$3,$11}'
+  info "Swap used: $(sysctl -n vm.swapusage 2>/dev/null | sed 's/.*used = //;s/  free.*//')   ${DIM}(high swap on low RAM = memory pressure)${X}"
+  hr
+  if command -v clamscan >/dev/null 2>&1; then ok "ClamAV present — run: gatekept scan"
+  else info "ClamAV not installed (optional): brew install clamav && freshclam"; fi
+  hr
+  bold "audit complete. ⚠ lines = review. Nothing was changed."
+}
+
+# ---- command: report (HTML dashboard) --------------------------------------
+html_escape() { sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'; }
+
+cmd_report() {
+  local out="${1:-${TMPDIR:-/tmp}/gatekept-report.html}"
+  bold "Scanning for HTML report... (~1-2 min)"
+  local recs; recs=$(scan_apps)
+  local total=0 okc=0 flagc=0 notarc=0 rtc=0 frows="" orows="" tiles="" tilen=0 st nm sg no rt rsn
+  while IFS=$'\t' read -r st nm sg no rt rsn; do
+    [ -z "$st" ] && continue
+    total=$((total+1))
+    [ "$no" = yes ] && notarc=$((notarc+1))
+    [ "$rt" = yes ] && rtc=$((rtc+1))
+    local cls badge verd enm row letter
+    if [ "$st" = FLAG ]; then flagc=$((flagc+1)); cls="flag"; badge="Flagged"; verd="$rsn"
+    else okc=$((okc+1)); cls="ok"; badge="Valid"; verd="$sg"; fi
+    enm=$(printf '%s' "$nm" | html_escape); verd=$(printf '%s' "$verd" | html_escape)
+    row="<tr class=\"${cls}\"><td class=\"nm\">${enm}</td><td class=\"vd\">${verd}</td><td class=\"bd\"><span class=\"badge ${cls}\">${badge}</span></td></tr>"
+    if [ "$cls" = flag ]; then frows="${frows}${row}"; else orows="${orows}${row}"; fi
+    if [ "$tilen" -lt 16 ]; then
+      letter=$(printf '%s' "${nm:0:1}" | html_escape)
+      tiles="${tiles}<div class=\"tile ${cls}\" title=\"${enm}\"><span class=\"ti\">${letter}</span><span class=\"dot\"></span></div>"
+      tilen=$((tilen+1))
+    fi
+  done <<< "$recs"
+  local rows="${frows}${orows}"
+  local pct_ok=0 pct_flag=0
+  [ "$total" -gt 0 ] && pct_ok=$(( okc * 100 / total )) && pct_flag=$(( flagc * 100 / total ))
+  local posture="Secure" pcls="ok"; [ "$flagc" -gt 0 ] && { posture="Review needed"; pcls="warn"; }
+  local flagcls=""; [ "$flagc" -gt 0 ] && flagcls="red"
+
+  local cache_rows="" c szc disp
+  for c in "$HOME/.npm" "$HOME/Library/pnpm" "$HOME/Library/Caches/pip" "$HOME/Library/Caches/Homebrew" "$HOME/.cache" "$HOME/Library/Developer/Xcode/DerivedData"; do
+    [ -e "$c" ] || continue
+    szc=$(du -sh "$c" 2>/dev/null | cut -f1)
+    disp=$(printf '%s' "${c/#$HOME/~}" | html_escape)
+    cache_rows="${cache_rows}<tr><td>${disp}</td><td class=\"r\">${szc}</td></tr>"
+  done
+  local ram swap host osv when
+  ram=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB",$1/1073741824}')
+  swap=$(sysctl -n vm.swapusage 2>/dev/null | sed 's/total = //;s/  (.*//')
+  host=$(scutil --get ComputerName 2>/dev/null || hostname); host=$(printf '%s' "$host" | html_escape)
+  osv="$(sw_vers -productName) $(sw_vers -productVersion)"
+  when=$(date '+%Y-%m-%d %H:%M')
+
+  cat > "$out" <<HTMLEOF
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gatekept — security report</title>
+<style>
+:root{--bg:#05080a;--win:#0b1113;--panel:#101719;--panel2:#0c1315;--line:#1b2528;--txt:#e3edee;--mut:#7f8f92;--grn:#34e0a1;--grn2:#1f6f57;--red:#ff5d6c;--amb:#ffb454}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(1100px 520px at 82% -8%,#0c1c19,transparent),radial-gradient(800px 400px at 0% 110%,#0a1614,transparent),var(--bg);color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:26px}
+.win{max-width:1180px;margin:0 auto;background:linear-gradient(180deg,#0c1416,var(--win));border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.bar{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--line);background:#0a1012}
+.dotmac{width:12px;height:12px;border-radius:50%}.dr{background:#ff5f57}.dy{background:#febc2e}.dg{background:#28c840}
+.cmd{margin-left:14px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}.cmd b{color:var(--grn)}
+.body{display:grid;grid-template-columns:200px 1fr}
+.side{border-right:1px solid var(--line);padding:16px 10px;background:#0a1113}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.5px;padding:6px 10px 16px;background:linear-gradient(90deg,#fff 35%,var(--grn));-webkit-background-clip:text;background-clip:text;color:transparent}
+.nav a{display:flex;gap:10px;align-items:center;padding:9px 12px;border-radius:9px;color:var(--mut);text-decoration:none;font-size:13px;margin:2px 0}
+.nav a.on{background:rgba(52,224,161,.12);color:var(--grn)}
+.main{padding:22px}
+.sub{color:var(--mut);font-size:12px;margin:-4px 0 18px}
+.row{display:grid;gap:14px}
+.top{grid-template-columns:1.4fr 1fr 1fr 1fr 1.3fr;align-items:stretch}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:13px;padding:16px}
+.k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+.v{font-size:26px;font-weight:700;margin-top:6px}.v.grn{color:var(--grn)}.v.red{color:var(--red)}.v small{font-size:13px;color:var(--mut);font-weight:500}
+.posture{display:flex;align-items:center;gap:13px}
+.shield{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:22px;background:rgba(52,224,161,.12);border:1px solid var(--grn2)}
+.posture.warn .shield{background:rgba(255,180,84,.12);border-color:#6b5325}
+.posture .v{font-size:19px;margin:0}
+.radar{position:relative;display:grid;place-items:center}
+.radar svg{width:120px;height:120px}
+.sweep{transform-origin:60px 60px;animation:spin 3.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:26px 0 11px}
+table{width:100%;border-collapse:collapse;background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase}
+tr:last-child td{border-bottom:0}
+td.r,th.r{text-align:right}.bd{text-align:right;width:96px}
+tr.flag .nm{color:var(--red);font-weight:600}.vd{color:var(--mut);font-size:12px}
+.badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+.badge.ok{background:rgba(52,224,161,.14);color:var(--grn)}
+.badge.flag{background:rgba(255,93,108,.14);color:var(--red)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.checks div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}
+.checks div:last-child{border:0}.checks .y{color:var(--grn);font-weight:600}
+.tiles{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
+.tile{position:relative;width:58px;height:58px;border-radius:14px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center}
+.tile .ti{font-weight:700;font-size:20px;color:var(--mut)}
+.tile .dot{position:absolute;right:-4px;top:-4px;width:14px;height:14px;border-radius:50%;border:2px solid var(--win)}
+.tile.ok .dot{background:var(--grn)}.tile.flag .dot{background:var(--red)}.tile.flag{border-color:#5a2a30}
+.foot{color:var(--mut);font-size:12px;margin-top:30px;text-align:center}
+@media(max-width:900px){.body{grid-template-columns:1fr}.side{display:none}.top{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}}
+</style></head><body>
+<div class="win">
+  <div class="bar"><span class="dotmac dr"></span><span class="dotmac dy"></span><span class="dotmac dg"></span><span class="cmd">\$ <b>gatekept</b> audit</span></div>
+  <div class="body">
+    <aside class="side">
+      <div class="brand">gatekept</div>
+      <nav class="nav">
+        <a class="on" href="#">▦ Overview</a>
+        <a href="#sig">⛨ Signatures</a>
+        <a href="#sig">▢ Applications</a>
+        <a href="#sys">⚙ System</a>
+        <a href="#caches">▤ Caches</a>
+        <a href="#sig">▥ Reports</a>
+      </nav>
+    </aside>
+    <main class="main">
+      <div class="sub">macOS security audit &amp; optimization · ${host} · ${osv} · ${when}</div>
+      <div class="row top">
+        <div class="card"><div class="posture ${pcls}"><div class="shield">🛡</div><div><div class="v">${posture}</div><div class="k">security posture</div></div></div></div>
+        <div class="card"><div class="k">Scanned</div><div class="v">${total}<small> items</small></div></div>
+        <div class="card"><div class="k">Verified</div><div class="v grn">${okc} <small>(${pct_ok}%)</small></div></div>
+        <div class="card"><div class="k">Flagged</div><div class="v ${flagcls}">${flagc} <small>(${pct_flag}%)</small></div></div>
+        <div class="card"><div class="k">Scan activity</div><div class="radar">
+          <svg viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#15302a" stroke-width="1"/>
+            <circle cx="60" cy="60" r="34" fill="none" stroke="#15302a" stroke-width="1"/>
+            <circle cx="60" cy="60" r="16" fill="none" stroke="#15302a" stroke-width="1"/>
+            <line x1="60" y1="60" x2="60" y2="8" stroke="#34e0a1" stroke-width="2" class="sweep"/>
+            <circle cx="86" cy="44" r="2.5" fill="#34e0a1"/><circle cx="42" cy="78" r="2" fill="#34e0a1"/>
+          </svg></div></div>
+      </div>
+
+      <h2 id="sig">Signature verification</h2>
+      <table><tr><th>Application</th><th>Signer / finding</th><th class="r">Status</th></tr>
+${rows}
+      </table>
+
+      <h2>Application status</h2>
+      <div class="tiles">${tiles}</div>
+
+      <div class="two">
+        <div>
+          <h2 id="sys">codesign / spctl checks</h2>
+          <div class="card checks">
+            <div><span>codesign verify</span><span class="y">✓ active</span></div>
+            <div><span>spctl --assess</span><span class="y">✓ active</span></div>
+            <div><span>notarized apps</span><span class="y">${notarc} / ${total}</span></div>
+            <div><span>hardened runtime</span><span class="y">${rtc} / ${total}</span></div>
+          </div>
+        </div>
+        <div>
+          <h2>Hardening posture</h2>
+          <table>
+            <tr><td>SIP</td><td class="r">$(p_sip)</td></tr>
+            <tr><td>Gatekeeper</td><td class="r">$(p_gatekeeper)</td></tr>
+            <tr><td>Firewall</td><td class="r">$(p_firewall)</td></tr>
+            <tr><td>FileVault</td><td class="r">$(p_filevault)</td></tr>
+            <tr><td>XProtect</td><td class="r">$(p_xprotect)</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="two">
+        <div>
+          <h2 id="caches">Reclaimable caches</h2>
+          <table><tr><th>Path</th><th class="r">Size</th></tr>${cache_rows}</table>
+        </div>
+        <div>
+          <h2>Memory</h2>
+          <table>
+            <tr><td>Physical RAM</td><td class="r">${ram}</td></tr>
+            <tr><td>Swap</td><td class="r">${swap}</td></tr>
+          </table>
+          <p class="vd" style="margin-top:10px">High swap on low RAM = memory pressure. Quit idle Electron apps / the iOS Simulator.</p>
+        </div>
+      </div>
+
+      <div class="foot">Generated by <b>gatekept</b> · read-only audit · this file is local &amp; not committed</div>
+    </main>
+  </div>
+</div>
+</body></html>
+HTMLEOF
+
+  ok "report written: $out"
+  command -v open >/dev/null 2>&1 && open "$out" 2>/dev/null && info "opened in browser"
+}
+
+# ---- command: optimize -----------------------------------------------------
+cmd_optimize() {
+  local apply=false; [ "${1:-}" = "--apply" ] && apply=true
+  local c; sz() { du -sh "$1" 2>/dev/null | cut -f1; }
+  bold "==== gatekept :: optimize  (mode: $([ "$apply" = true ] && echo APPLY || echo DRY-RUN)) ===="
+  hr; bold "Reclaimable caches (regenerate on demand):"
+  for c in "$HOME/.npm" "$HOME/Library/pnpm" "$HOME/Library/Caches/pip" "$HOME/Library/Caches/Homebrew" "$HOME/.cache" "$HOME/Library/Developer/Xcode/DerivedData" "$HOME/Library/Developer/CoreSimulator/Caches"; do
+    [ -e "$c" ] && printf "  %-55s %s\n" "$c" "$(sz "$c")"
+  done
+  hr; bold "Memory pressure:"
+  info "Physical RAM: $(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f GB",$1/1073741824}')"
+  info "Swap: $(sysctl -n vm.swapusage 2>/dev/null | sed 's/total = //;s/  (.*//')"
+  hr
+  if [ "$apply" != true ]; then bold "DRY-RUN. Re-run 'gatekept optimize --apply' to clean."; return 0; fi
+  bold "Applying safe cleanups..."
+  command -v npm   >/dev/null 2>&1 && { info "npm cache clean";  npm cache clean --force >/dev/null 2>&1 && ok "npm"; }
+  command -v pip3  >/dev/null 2>&1 && { info "pip cache purge";  pip3 cache purge >/dev/null 2>&1 && ok "pip"; }
+  command -v pnpm  >/dev/null 2>&1 && { info "pnpm store prune"; pnpm store prune >/dev/null 2>&1 && ok "pnpm"; }
+  command -v brew  >/dev/null 2>&1 && { info "brew cleanup -s";  brew cleanup -s >/dev/null 2>&1 && ok "brew"; }
+  command -v xcrun >/dev/null 2>&1 && { info "delete unavailable simulators"; xcrun simctl delete unavailable >/dev/null 2>&1 && ok "simulators"; }
+  hr; bold "optimize complete. ~/.cache left intact (may hold slow-to-rebuild downloads)."
+}
+
+# ---- command: scan ---------------------------------------------------------
+cmd_scan() {
+  command -v clamscan >/dev/null 2>&1 || { echo "gatekept: ClamAV not installed. Run: brew install clamav && freshclam" >&2; return 2; }
+  bold "==== gatekept :: ClamAV scan ===="
+  clamscan -r -i --stdout --exclude-dir="$CLOUD_EXCLUDE" --max-filesize=200M --max-scansize=2000M \
+    "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "/Applications" "$HOME/Library"
+}
+
+# ---- dispatch --------------------------------------------------------------
+main() {
+  case "${1:-audit}" in
+    audit)          require_macos; cmd_audit ;;
+    report|--html)  require_macos; shift || true; cmd_report "${1:-}" ;;
+    optimize|opt)   require_macos; shift; cmd_optimize "${1:-}" ;;
+    scan)           require_macos; cmd_scan ;;
+    full)           require_macos; cmd_audit; echo; cmd_optimize ;;
+    -h|--help|help) usage ;;
+    -v|--version)   echo "gatekept $VERSION" ;;
+    *) echo "gatekept: unknown command '$1'" >&2; echo "try: gatekept --help" >&2; exit 2 ;;
+  esac
+}
+main "$@"

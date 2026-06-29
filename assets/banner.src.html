@@ -1,0 +1,102 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>gatekept — banner (sample data, no real machine info)</title>
+<style>
+:root{--bg:#05080a;--win:#0b1113;--panel:#101719;--panel2:#0c1315;--line:#1b2528;--txt:#e3edee;--mut:#7f8f92;--grn:#34e0a1;--grn2:#1f6f57;--red:#ff5d6c;--amb:#ffb454}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1600px;height:800px;overflow:hidden;background:
+  radial-gradient(900px 500px at 100% 0%,#0d201c,transparent),
+  radial-gradient(700px 420px at -5% 110%,#0a1614,transparent),
+  var(--bg);
+  color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  display:grid;grid-template-columns:46% 54%;align-items:center}
+.dots{position:absolute;inset:0;background-image:radial-gradient(rgba(52,224,161,.07) 1px,transparent 1px);background-size:26px 26px;mask-image:radial-gradient(700px 500px at 75% 30%,#000,transparent)}
+/* ---- left hero ---- */
+.hero{padding:0 40px 0 74px;position:relative;z-index:2}
+.logo{font-size:118px;font-weight:800;letter-spacing:-4px;line-height:1;background:linear-gradient(95deg,#ffffff 32%,var(--grn) 80%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.tag{font-size:30px;font-weight:600;color:var(--grn);margin-top:14px;letter-spacing:-.3px}
+.lede{font-size:26px;color:#c2cdce;margin-top:22px;max-width:560px;line-height:1.35}
+.term{margin-top:30px;display:inline-flex;align-items:center;gap:10px;border:1px solid #2b4a42;background:#0a1411;border-radius:12px;padding:15px 22px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:22px}
+.term .d{color:var(--grn)}.term .c{color:#cfeee3}
+.pills{display:flex;gap:14px;margin-top:26px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);background:#0c1416;border-radius:11px;padding:12px 16px;font-size:16px;color:#cdd8d9}
+.pill .ic{color:var(--grn);font-size:17px}
+/* ---- right preview window ---- */
+.preview{position:relative;z-index:2;padding-right:60px}
+.win{background:linear-gradient(180deg,#0c1416,var(--win));border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.55)}
+.bar{display:flex;align-items:center;gap:8px;padding:13px 16px;border-bottom:1px solid var(--line);background:#0a1012}
+.dotmac{width:12px;height:12px;border-radius:50%}.dr{background:#ff5f57}.dy{background:#febc2e}.dg{background:#28c840}
+.cmd{margin-left:14px;color:var(--mut);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}.cmd b{color:var(--grn)}
+.body{display:grid;grid-template-columns:158px 1fr}
+.side{border-right:1px solid var(--line);padding:14px 9px;background:#0a1113}
+.brand{font-weight:800;font-size:17px;letter-spacing:-.5px;padding:5px 9px 14px;background:linear-gradient(90deg,#fff 35%,var(--grn));-webkit-background-clip:text;background-clip:text;color:transparent}
+.nav a{display:flex;gap:9px;align-items:center;padding:8px 10px;border-radius:8px;color:var(--mut);text-decoration:none;font-size:12.5px;margin:2px 0}
+.nav a.on{background:rgba(52,224,161,.12);color:var(--grn)}
+.main{padding:18px}
+.top{display:grid;grid-template-columns:1.5fr 1fr 1fr 1.2fr;gap:11px}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:12px;padding:13px}
+.k{color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+.v{font-size:22px;font-weight:700;margin-top:5px}.v.grn{color:var(--grn)}.v.red{color:var(--red)}.v small{font-size:12px;color:var(--mut);font-weight:500}
+.posture{display:flex;align-items:center;gap:11px}
+.shield{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:19px;background:rgba(255,180,84,.12);border:1px solid #6b5325}
+.posture .v{font-size:16px;margin:0}
+.radar{display:grid;place-items:center}.radar svg{width:74px;height:74px}.sweep{transform-origin:37px 37px;transform:rotate(42deg)}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:18px 0 9px}
+table{width:100%;border-collapse:collapse;background:var(--panel2);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+td{padding:8.5px 13px;border-bottom:1px solid var(--line);font-size:12.5px}
+tr:last-child td{border-bottom:0}.bd{text-align:right;width:84px}
+tr.flag .nm{color:var(--red);font-weight:600}tr.warn .nm{color:var(--amb);font-weight:600}.vd{color:var(--mut);font-size:11.5px}
+.badge{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:999px}
+.badge.ok{background:rgba(52,224,161,.14);color:var(--grn)}
+.badge.flag{background:rgba(255,93,108,.14);color:var(--red)}
+.badge.warn{background:rgba(255,180,84,.14);color:var(--amb)}
+</style></head><body>
+<div class="dots"></div>
+
+<div class="hero">
+  <div class="logo">gatekept</div>
+  <div class="tag">macOS security audit + optimization</div>
+  <div class="lede">Catches fake, cracked, and tampered apps that signature AV misses.</div>
+  <div class="term"><span class="d">$</span><span class="c">gatekept audit</span></div>
+  <div class="pills">
+    <span class="pill"><span class="ic">🛡</span> Audit posture</span>
+    <span class="pill"><span class="ic">⛨</span> Verify signatures</span>
+    <span class="pill"><span class="ic">▤</span> Reclaim dev caches</span>
+  </div>
+</div>
+
+<div class="preview">
+  <div class="win">
+    <div class="bar"><span class="dotmac dr"></span><span class="dotmac dy"></span><span class="dotmac dg"></span><span class="cmd">$ <b>gatekept</b> audit</span></div>
+    <div class="body">
+      <aside class="side">
+        <div class="brand">gatekept</div>
+        <nav class="nav">
+          <a class="on" href="#">▦ Overview</a>
+          <a href="#">⛨ Signatures</a>
+          <a href="#">▢ Applications</a>
+          <a href="#">⚙ System</a>
+          <a href="#">▤ Caches</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <div class="top">
+          <div class="card"><div class="posture"><div class="shield">🛡</div><div><div class="v">Review needed</div><div class="k">posture</div></div></div></div>
+          <div class="card"><div class="k">Scanned</div><div class="v">128</div></div>
+          <div class="card"><div class="k">Verified</div><div class="v grn">125<small> 98%</small></div></div>
+          <div class="card"><div class="k">Flagged</div><div class="v red">3<small> 2%</small></div></div>
+        </div>
+        <h2>Signature verification</h2>
+        <table>
+          <tr class="flag"><td class="nm">Adobe Illustrator 2025</td><td class="vd">ad-hoc signed; injector dylib</td><td class="bd"><span class="badge flag">Flagged</span></td></tr>
+          <tr class="flag"><td class="nm">VideoConverter Pro</td><td class="vd">dev/sideloaded cert</td><td class="bd"><span class="badge flag">Flagged</span></td></tr>
+          <tr class="warn"><td class="nm">NotePad Pro</td><td class="vd">unsigned</td><td class="bd"><span class="badge warn">Unverified</span></td></tr>
+          <tr class="ok"><td class="nm">Xcode</td><td class="vd">Developer ID: Apple Inc.</td><td class="bd"><span class="badge ok">Valid</span></td></tr>
+          <tr class="ok"><td class="nm">Visual Studio Code</td><td class="vd">Developer ID: Microsoft</td><td class="bd"><span class="badge ok">Valid</span></td></tr>
+          <tr class="ok"><td class="nm">Slack</td><td class="vd">Developer ID: Slack Technologies</td><td class="bd"><span class="badge ok">Valid</span></td></tr>
+        </table>
+      </main>
+    </div>
+  </div>
+</div>
+</body></html>
