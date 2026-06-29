@@ -44,6 +44,13 @@ Generates a **self-contained HTML report** and opens it in your browser — secu
 
 > The generated report contains your real machine/app data — it is written to `$TMPDIR` and **git-ignored**. Never commit it.
 
+### `gatekept inspect <app>` — is this unsigned app safe?
+Not every unsigned app is malware — open-source and self-built apps are **ad-hoc / linker-signed** by the compiler. `inspect` runs a **deep static risk analysis** of a single app and returns a **LOW / MEDIUM / HIGH** verdict. It checks notarization; whether an ad-hoc signature is compiler-applied (benign) or **manually re-signed** (crack pattern); injector dylibs; risky **entitlements** (`get-task-allow`, `disable-library-validation`); non-system linked dylibs; **suspicious strings** (osascript, `/tmp`, keychain access); download provenance; and — if you set `VT_API_KEY` — a **VirusTotal** hash-reputation lookup.
+
+```bash
+gatekept inspect ~/Downloads/Something.app
+```
+
 ### `gatekept scan` — optional ClamAV layer
 Known-malware signatures — complements, does not replace, the signature sweep.
 
@@ -104,6 +111,7 @@ ln -s "$PWD" ~/.codex/skills/gatekept
 | `gatekept audit` | full security audit | ❌ read-only |
 | `gatekept audit --json` | same, machine-readable JSON | ❌ read-only |
 | `gatekept report` | HTML dashboard, opens in browser | ❌ read-only |
+| `gatekept inspect <app>` | deep risk analysis of one app (LOW/MED/HIGH) | ❌ read-only |
 | `gatekept optimize` | report reclaimable caches | ❌ read-only |
 | `gatekept optimize --apply` | clean caches + unused sims | ✅ caches only |
 | `gatekept scan` | ClamAV known-malware scan | ❌ read-only |

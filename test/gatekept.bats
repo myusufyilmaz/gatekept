@@ -49,3 +49,15 @@ GK="${BATS_TEST_DIRNAME}/../bin/gatekept"
   [[ "$output" == *"Login items"* ]]
   [[ "$output" == *"Malware staging"* ]]
 }
+
+@test "inspect produces a risk verdict for an app" {
+  app=$(find /Applications -maxdepth 1 -name '*.app' | head -1)
+  [ -n "$app" ] || skip "no apps to inspect"
+  run "$GK" inspect "$app"
+  [[ "$output" == *risk* ]]
+}
+
+@test "inspect with no argument is a usage error" {
+  run "$GK" inspect
+  [ "$status" -eq 2 ]
+}

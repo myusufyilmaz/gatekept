@@ -18,7 +18,7 @@
 # Exit status: 0 = clean, 3 = suspicious findings, 2 = usage error.
 
 set -uo pipefail
-VERSION="1.4.0"
+VERSION="1.5.0"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 # ---- presentation (TTY-aware) ----------------------------------------------
@@ -56,6 +56,7 @@ Commands:
   audit [--json]     Read-only security audit (posture, fake-app sweep,
                      persistence, shell-config, resources). Default command.
   report             Render a self-contained HTML dashboard and open it.
+  inspect <app>      Deep static risk analysis of one app (LOW/MED/HIGH verdict).
   optimize           Report reclaimable dev caches + memory pressure.
     --apply          Actually clean caches (npm/pnpm/pip/brew) + unused sims.
   scan               ClamAV known-malware scan (requires: brew install clamav).
@@ -88,7 +89,7 @@ p_xprotect()  { defaults read /Library/Apple/System/Library/CoreServices/XProtec
 # ---- classify one app: print TSV record ------------------------------------
 # STATUS \t NAME \t SIGNER \t NOTARIZED \t RUNTIME \t REASON
 classify_one() {
-  local app="$1" name csinfo spinfo auth inj reason notar rt gk_ok status
+  local app="$1" name csinfo spinfo auth inj reason notar rt gk_ok status linker adhoc
   [ -d "$app" ] || return 0
   name=$(basename "$app" .app)
   csinfo=$(codesign -dvvv "$app" 2>&1)
@@ -98,13 +99,17 @@ classify_one() {
   gk_ok=true;  printf '%s\n' "$spinfo" | grep -qi 'accepted' || gk_ok=false
   notar=no;    printf '%s\n' "$spinfo" | grep -qi 'Notarized' && notar=yes
   rt=no;       printf '%s\n' "$csinfo" | grep -q 'flags=.*runtime' && rt=yes
+  linker=no; printf '%s\n' "$csinfo" | grep -q 'linker-signed' && linker=yes
+  adhoc=no;  printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && adhoc=yes
   reason=""
   [ -n "$inj" ] && reason="injector dylib ($(basename "$inj")); ${reason}"
-  printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && reason="ad-hoc signed; ${reason}"
+  # manual ad-hoc = re-signed crack/tamper. linker-signed ad-hoc = benign un-notarized
+  # build (compiler-applied local signature), common for open-source / self-built apps.
+  [ "$adhoc" = yes ] && [ "$linker" = no ] && reason="ad-hoc re-signed (tamper/crack pattern); ${reason}"
   case "$auth" in
     "Apple Development"*|"Apple Distribution"*) reason="dev/sideloaded cert; ${reason}" ;;
     "Developer ID Application"*|"Apple iPhone OS Application Signing"|"Software Signing"|"Apple Mac OS Application Signing"|"Apple Mac OS X Application Signing") : ;;
-    *) [ "$gk_ok" = false ] && reason="unrecognized signer + Gatekeeper-rejected; ${reason}" ;;
+    *) { [ "$gk_ok" = false ] && [ "$linker" = no ]; } && reason="unrecognized signer + Gatekeeper-rejected; ${reason}" ;;
   esac
   status="OK"; [ -n "$reason" ] && status="FLAG"
   [ -z "$reason" ] && reason="-"
@@ -429,12 +434,89 @@ cmd_scan() {
     "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "/Applications" "$HOME/Library"
 }
 
+# ---- command: inspect — deep static risk analysis of one app ---------------
+# Decides whether an unsigned / un-notarized app is actually dangerous, instead
+# of flagging every ad-hoc app. Verdict: LOW / MEDIUM / HIGH.
+cmd_inspect() {
+  local app="${1:-}"
+  [ -n "$app" ] || { echo "usage: gatekept inspect /path/to/App.app" >&2; return 2; }
+  [ -e "$app" ] || { echo "gatekept: not found: $app" >&2; return 2; }
+  local bin csinfo spinfo auth ents iocs extlibs wherefrom e d
+  local notar=no sealok=yes linker=no adhoc=no hi=0 score=0 reasons=""
+  bin="$app/Contents/MacOS/$(defaults read "$app/Contents/Info.plist" CFBundleExecutable 2>/dev/null)"
+  csinfo=$(codesign -dvvv "$app" 2>&1)
+  spinfo=$(spctl -a -t exec -vv "$app" 2>&1)
+  auth=$(printf '%s\n' "$csinfo" | sed -n 's/^Authority=//p' | head -1)
+  printf '%s\n' "$spinfo" | grep -qi 'Notarized' && notar=yes
+  codesign --verify --deep --strict "$app" >/dev/null 2>&1 || sealok=no
+  printf '%s\n' "$csinfo" | grep -q 'linker-signed' && linker=yes
+  printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && adhoc=yes
+
+  bold "==== gatekept :: inspect ===="
+  echo "app: $app"; hr
+  bold "Signature"
+  info "authority:   ${auth:-(none / ad-hoc)}"
+  info "notarized:   $notar    seal: $([ "$adhoc" = yes ] && echo 'n/a (ad-hoc)' || echo "$sealok")"
+  info "ad-hoc:      $adhoc    linker-signed: $linker"
+  hr
+  if [ "$notar" = yes ] && printf '%s' "$auth" | grep -q 'Developer ID Application'; then
+    ok "Notarized Developer ID — Apple-vouched."; bold "VERDICT: LOW risk."; return 0
+  fi
+
+  bold "Indicators"
+  if [ -n "$(find "$app/Contents/MacOS" -maxdepth 1 -iname '*inject*' 2>/dev/null | head -1)" ]; then
+    flag "injector dylib present (crack/loader pattern)"; hi=1; reasons="injector; $reasons"; else ok "no injector dylib"; fi
+  [ "$adhoc" = yes ] && [ "$linker" = no ] && { flag "manually ad-hoc re-signed (tamper pattern)"; hi=1; reasons="ad-hoc re-sign; $reasons"; }
+  [ "$adhoc" = yes ] && [ "$linker" = yes ] && ok "ad-hoc but linker-signed (compiler default — benign)"
+  # a broken seal only signals tampering on apps that present a REAL certificate;
+  # ad-hoc / linker-signed apps legitimately have no seal, so --strict always fails.
+  [ "$sealok" = no ] && [ "$adhoc" = no ] && { flag "code-signature seal broken / modified (tamper)"; hi=1; reasons="broken seal; $reasons"; }
+  ents=$(codesign -d --entitlements - --xml "$app" 2>/dev/null)
+  for e in get-task-allow disable-library-validation allow-dyld-environment-variables allow-unsigned-executable-memory; do
+    printf '%s' "$ents" | grep -q "$e" && { flag "risky entitlement: $e"; score=$((score+1)); reasons="$e; $reasons"; }
+  done
+  [ "$(defaults read "$app/Contents/Info.plist" LSUIElement 2>/dev/null)" = 1 ] && \
+    { info "hidden background agent (LSUIElement) — normal for menubar apps, odd for unknown tools"; score=$((score+1)); }
+  if [ -e "$bin" ]; then
+    extlibs=$(otool -L "$bin" 2>/dev/null | grep -E '^[[:space:]]' | sed 's/ (compatibility.*//; s/^[[:space:]]*//' | grep -vE '^/System/|^/usr/lib/|^@executable_path|^@rpath|^@loader_path')
+    if [ -n "$extlibs" ]; then printf '%s\n' "$extlibs" | while read -r d; do flag "links non-system dylib: $d"; done; score=$((score+1)); reasons="non-system dylib; $reasons"; fi
+    iocs=$(strings -a "$bin" 2>/dev/null | grep -iE 'osascript|/tmp/|base64[[:space:]]+-d|security[[:space:]]+find-generic-password|curl[[:space:]]|/dev/tcp/|hdiutil' | sort -u | head -8)
+    [ -n "$iocs" ] && { flag "suspicious strings in binary:"; printf '%s\n' "$iocs" | sed 's/^/        /'; score=$((score+2)); reasons="IOC strings; $reasons"; }
+  fi
+  wherefrom=$(mdls -name kMDItemWhereFroms "$app" 2>/dev/null | grep -vi '(null)' | tr -d '\n' | sed 's/kMDItemWhereFroms = //')
+  [ -n "$wherefrom" ] && info "downloaded from: $wherefrom"
+  if [ -n "${VT_API_KEY:-}" ] && [ -e "$bin" ]; then
+    local sha vt mal; sha=$(shasum -a 256 "$bin" | cut -d' ' -f1)
+    vt=$(curl -s -H "x-apikey: ${VT_API_KEY}" "https://www.virustotal.com/api/v3/files/$sha" 2>/dev/null)
+    mal=$(printf '%s' "$vt" | python3 -c "import sys,json
+try: print(json.load(sys.stdin)['data']['attributes']['last_analysis_stats']['malicious'])
+except Exception: print('na')" 2>/dev/null)
+    case "$mal" in
+      na|"") info "VirusTotal: no record / lookup failed" ;;
+      0) ok "VirusTotal: 0 / many engines flag it" ;;
+      *) flag "VirusTotal: $mal engines flag this binary"; hi=1; reasons="VT:$mal; $reasons" ;;
+    esac
+  else
+    info "VirusTotal: set VT_API_KEY to enable hash-reputation lookup"
+  fi
+  hr
+  bold "Verdict"
+  if [ "$hi" -gt 0 ] || [ "$score" -ge 3 ]; then
+    flag "HIGH risk — ${reasons%; }. Don't run it; move to Trash."; return 3
+  elif [ "$score" -ge 1 ]; then
+    flag "MEDIUM risk — ${reasons%; }. Verify the source before running."; return 3
+  else
+    ok "LOW risk — unsigned/un-notarized but no malicious indicators (typical of open-source or self-built apps)."; return 0
+  fi
+}
+
 # ---- dispatch --------------------------------------------------------------
 main() {
   case "${1:-audit}" in
     _classify)      classify_one "${2:-}" ;;          # internal parallel worker
     audit)          require_macos; shift || true; cmd_audit "${1:-}" ;;
     report|--html)  require_macos; shift || true; cmd_report "${1:-}" ;;
+    inspect)        require_macos; shift || true; cmd_inspect "${1:-}" ;;
     optimize|opt)   require_macos; shift; cmd_optimize "${1:-}" ;;
     scan)           require_macos; cmd_scan ;;
     full)           require_macos; cmd_audit; echo; cmd_optimize ;;

@@ -31,6 +31,7 @@ directory is the skill checkout. All commands are read-only except
 ```bash
 bin/gatekept audit            # read-only security audit (default)
 bin/gatekept audit --json     # same, machine-readable JSON
+bin/gatekept inspect <app>    # deep risk analysis of one app (LOW/MED/HIGH)
 bin/gatekept report           # generate + open an HTML dashboard
 bin/gatekept optimize         # dry-run: report reclaimable caches
 bin/gatekept optimize --apply # clean npm/pnpm/pip/brew caches + unused sims
