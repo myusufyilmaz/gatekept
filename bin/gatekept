@@ -18,7 +18,7 @@
 # Exit status: 0 = clean, 3 = suspicious findings, 2 = usage error.
 
 set -uo pipefail
-VERSION="1.3.0"
+VERSION="1.3.1"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 # ---- presentation (TTY-aware) ----------------------------------------------
@@ -158,7 +158,7 @@ shellrc_suspects() {
 # ---- login items + cron + login hooks (BTM-era persistence) ----------------
 # prints TSV: TYPE \t ITEM \t REASON   (suspicious only)
 startup_suspects() {
-  local raw name path csinfo reason h v
+  local raw name path csinfo reason h v spok
   raw=$(osascript \
     -e 'tell application "System Events"' \
     -e 'set o to {}' \
@@ -179,10 +179,15 @@ startup_suspects() {
     reason=""
     printf '%s\n' "$csinfo" | grep -q 'code object is not signed' && reason="unsigned"
     printf '%s\n' "$csinfo" | grep -q 'flags=.*adhoc' && reason="ad-hoc signed"
-    case "$path" in
-      "$HOME"/Downloads/*|/tmp/*|/private/tmp/*|/private/var/folders/*)
-        reason="${reason:+$reason; }runs from user-writable path ($path)" ;;
-    esac
+    # location is only a flag when Gatekeeper does NOT already trust the item
+    # (a notarized Developer-ID app in ~/Downloads is fine — Apple vouched for it)
+    spok=true; spctl -a -t exec "$path" >/dev/null 2>&1 || spok=false
+    if [ "$spok" = false ]; then
+      case "$path" in
+        "$HOME"/Downloads/*|/tmp/*|/private/tmp/*|/private/var/folders/*)
+          reason="${reason:+$reason; }untrusted, runs from user-writable path ($path)" ;;
+      esac
+    fi
     [ -n "$reason" ] && printf 'login-item\t%s\t%s\n' "$name" "$reason"
   done <<< "$raw"
   for h in LoginHook LogoutHook; do

@@ -155,6 +155,28 @@ See [SECURITY.md](SECURITY.md) for reporting.
 
 ---
 
+## FAQ
+
+**How do I check my Mac for malware for free?**
+Run `gatekept audit`. It's a free, open-source, read-only scan that verifies every app's code signature with Apple's `codesign` and `spctl`, audits persistence (LaunchAgents/Daemons, Login Items, cron, shell configs), and checks `/tmp` for dropped payloads. No account, no dependencies.
+
+**Does antivirus detect cracked or pirated Mac apps?**
+Usually not. Signature antivirus (including ClamAV) matches *known* malware hashes — a cracked or repackaged app that's merely ad-hoc-signed often scans "clean." Code-signature verification catches it, because the app can't forge a real Developer ID. That's gatekept's core check.
+
+**How do I detect AMOS / Atomic Stealer on macOS?**
+AMOS spreads through cracked apps and ClickFix lures, drops ad-hoc-signed payloads in `/tmp`, and persists via Background Task Management login items. `gatekept audit` flags ad-hoc/unsigned apps, unsigned `/tmp` executables, and untrusted login items — the surfaces AMOS uses.
+
+**What is ClickFix and how do I check for it?**
+ClickFix tricks you into pasting a Terminal command (often from a fake CAPTCHA) that downloads and runs malware. gatekept can't stop the paste, but it scans the artifacts it leaves — `/tmp` staging binaries and shell-config hijacks — and surfaces them.
+
+**Is gatekept safe to run?**
+Yes. `audit`, `report`, and `scan` are strictly read-only. `optimize` is dry-run unless you pass `--apply`, and even then only clears regenerable caches. It never deletes apps or user data, never touches your cloud-storage mount, and makes no network calls (except the optional ClamAV scan). It's one readable, shellcheck-clean Bash script — read it before you run it.
+
+**Does it work with Claude Code and OpenAI Codex?**
+Yes — it's a CLI *and* a skill for both. Clone into `~/.claude/skills/gatekept` (Claude Code) or `~/.codex/skills/gatekept` (OpenAI Codex), then ask your agent to "security scan my Mac."
+
+---
+
 ## Credits & inspiration
 
 - **[Trail of Bits — Claude Code security skills](https://github.com/trailofbits/skills)** — gold-standard security skills (Mach-O / YARA aware). Complementary for deep binary analysis.

@@ -1,0 +1,9 @@
+title: gatekept
+description: >-
+  Free macOS security audit & malware scanner — catches fake, cracked, and
+  tampered apps that signature antivirus misses (codesign / spctl). Detects
+  AMOS / Atomic Stealer, ClickFix payloads, and Background Task Management
+  persistence. Works as a CLI and as a Claude Code & OpenAI Codex skill.
+theme: jekyll-theme-cayman
+plugins:
+  - jekyll-seo-tag

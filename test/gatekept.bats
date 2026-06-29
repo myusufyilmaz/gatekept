@@ -38,3 +38,14 @@ GK="${BATS_TEST_DIRNAME}/../bin/gatekept"
   [ "$status" -eq 0 ]
   [[ "$output" == OK*$'\t'* || "$output" == FLAG*$'\t'* ]]
 }
+
+@test "audit --json exposes new detection counters" {
+  run bash -c "'$GK' audit --json | python3 -c 'import json,sys; s=json.load(sys.stdin)[\"summary\"]; assert all(k in s for k in (\"login_item_flags\",\"staging_flags\",\"persistence_flags\",\"shell_hijack_flags\"))'"
+  [ "$status" -eq 0 ]
+}
+
+@test "audit text output includes login-items and staging sections" {
+  run "$GK" audit
+  [[ "$output" == *"Login items"* ]]
+  [[ "$output" == *"Malware staging"* ]]
+}

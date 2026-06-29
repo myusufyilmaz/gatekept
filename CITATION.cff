@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use gatekept, please cite it."
+title: gatekept
+abstract: >-
+  A macOS security audit and optimization CLI that catches fake, cracked, and
+  tampered applications that signature antivirus misses, using Apple's codesign
+  and spctl. Audits hardening posture, persistence (LaunchAgents/Daemons,
+  Login Items/BTM, cron, shell configs), and /tmp staging used by AMOS and
+  ClickFix. Also packaged as a Claude Code and OpenAI Codex skill.
+type: software
+authors:
+  - name: "myusufyilmaz"
+repository-code: "https://github.com/myusufyilmaz/gatekept"
+url: "https://github.com/myusufyilmaz/gatekept"
+license: MIT
+version: "1.3.1"
+keywords:
+  - macOS
+  - security
+  - security-audit
+  - malware-detection
+  - codesign
+  - gatekeeper
+  - AMOS
+  - ClickFix
+  - persistence
+  - Claude Code
+  - OpenAI Codex
