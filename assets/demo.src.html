@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>gatekept demo (sample output — no real data)</title>
+<style>
+:root{--bg:#0a0f10;--win:#0c1315;--bar:#0a1012;--txt:#d6e3e4;--mut:#7f8f92;--grn:#34e0a1;--red:#ff5d6c;--cy:#5cc8ff;--dim:#56636a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:radial-gradient(900px 500px at 80% -10%,#0c1c19,transparent),var(--bg);padding:30px;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Monaco,monospace}
+.win{max-width:940px;margin:0 auto;background:var(--win);border:1px solid #1b2528;border-radius:14px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.bar{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--bar);border-bottom:1px solid #1b2528}
+.d{width:12px;height:12px;border-radius:50%}.r{background:#ff5f57}.y{background:#febc2e}.g{background:#28c840}
+.title{margin-left:12px;color:var(--mut);font-size:12px}
+.body{padding:18px 20px;color:var(--txt);white-space:pre-wrap}
+.p{color:var(--grn);font-weight:700}.cmd{color:#fff}
+.h{color:var(--cy);font-weight:700}.ok{color:var(--grn)}.warn{color:var(--red);font-weight:600}
+.mut{color:var(--mut)}.dim{color:var(--dim)}
+</style></head><body>
+<div class="win">
+  <div class="bar"><span class="d r"></span><span class="d y"></span><span class="d g"></span><span class="title">gatekept — sample output (no real machine data)</span></div>
+<div class="body"><span class="p">$</span> <span class="cmd">gatekept audit</span>
+<span class="h">==== gatekept :: security audit ====</span>
+<span class="mut">host: MacBook Pro   macOS 26.5.1   2026-06-28 21:30</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">1. Hardening posture</span>
+  SIP: enabled    Gatekeeper: enabled    Firewall: enabled    FileVault: On
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">2. App signature sweep — fake / cracked / tampered apps</span>
+  <span class="warn">⚠ Adobe Illustrator 2025 — injector dylib (CoreInject.dylib); ad-hoc re-signed</span>
+    <span class="dim">signer: (unsigned)</span>
+  <span class="dim">128 scanned · 127 verified · 1 flagged · 121 notarized · 124 hardened-runtime</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">3. Persistence — LaunchAgents / LaunchDaemons (target binary verified)</span>
+  <span class="ok">✓ no suspicious persistence targets</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">4. Login items / cron / startup hooks (BTM-era persistence)</span>
+  <span class="ok">✓ no suspicious login items, cron, or hooks</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">5. Shell-config hijack (.zshrc / .zshenv / .bash_profile …)</span>
+  <span class="ok">✓ no suspicious shell-config lines</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">6. Malware staging — unsigned executables in /tmp (AMOS / ClickFix drop zone)</span>
+  <span class="ok">✓ no unsigned executables staged in temp dirs</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">7. Downloads — unsigned / cracked apps in ~/Downloads</span>
+  <span class="warn">⚠ VideoConverter Pro — ad-hoc re-signed (tamper/crack pattern)</span>
+<span class="dim">──────────────────────────────────────────────────────────</span>
+<span class="h">audit complete — 2 finding(s) to review.</span>
+
+<span class="p">$</span> <span class="cmd">gatekept inspect ~/Downloads/VideoConverter\ Pro.app</span>
+  <span class="warn">⚠ HIGH risk — manual ad-hoc re-sign; non-system dylib. Don't run it; move to Trash.</span>
+</div></div></body></html>

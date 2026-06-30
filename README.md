@@ -17,6 +17,10 @@
 >
 > **Signature antivirus does not detect impersonation. Code-signature verification does.** `gatekept` leads with the check that actually works.
 
+![gatekept audit — sample output](assets/demo.png)
+
+*(sample output — no real machine data)*
+
 ---
 
 ## What it does
